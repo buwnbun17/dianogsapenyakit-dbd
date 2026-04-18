@@ -1,0 +1,208 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+<meta charset="UTF-8">
+<title>Sistem Pakar DBD - CF Final</title>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+
+<style>
+body { font-family: 'Segoe UI'; margin: 40px; background: #f4f7f6; }
+.container { background: white; padding: 30px; border-radius: 12px; max-width: 900px; margin: auto; }
+h1 { text-align: center; color: #c0392b; }
+.card { margin-bottom: 15px; padding: 10px; border-left: 5px solid #c0392b; }
+label { margin-right: 10px; font-size: 13px; cursor: pointer; }
+button { padding: 10px 20px; border-radius: 20px; border: none; cursor: pointer; }
+.btn { background: #27ae60; color: white; }
+.pdf { background: #2980b9; color: white; display:none; }
+pre { background:#f8f9fa; padding:10px; white-space: pre-wrap; }
+</style>
+</head>
+
+<body>
+
+<div class="container">
+
+<h1>Sistem Pakar Diagnosa DBD</h1>
+
+<div id="form"></div>
+
+<br>
+<button class="btn" onclick="proses()">Hasil Diagnosa</button>
+<button class="pdf" id="pdfBtn" onclick="downloadPDF()">Download PDF</button>
+
+<div id="hasil"></div>
+<pre id="log"></pre>
+
+</div>
+
+<script>
+
+// DATA GEJALA
+const gejala = [
+{id:"G1", nama:"Demam", pakar:0.8},
+{id:"G2", nama:"Nyeri sendi", pakar:0.8},
+{id:"G3", nama:"Nyeri otot", pakar:0.7},
+{id:"G4", nama:"Sakit kepala", pakar:0.6},
+{id:"G5", nama:"Mual", pakar:0.4},
+{id:"G6", nama:"Muntah", pakar:0.6},
+{id:"G7", nama:"Ruam", pakar:0.4},
+{id:"G8", nama:"Pendarahan", pakar:0.9},
+{id:"G9", nama:"Trombosit rendah", pakar:0.9},
+{id:"G10", nama:"Durasi ≥5 hari", pakar:0.7}
+];
+
+// OPSI USER
+const opsi = [
+{label:"Sangat Yakin", val:1},
+{label:"Yakin", val:0.8},
+{label:"Cukup Yakin", val:0.6},
+{label:"Sedikit Yakin", val:0.4},
+{label:"Tidak Tahu", val:0.2},
+{label:"Tidak", val:0}
+];
+
+// RULE
+const ruleP1 = ["G1","G2","G3","G4","G5","G7"]; // DD
+const ruleP2 = ["G1","G6","G8","G9","G10"]; // DBD
+
+const form = document.getElementById("form");
+
+// FORM
+gejala.forEach((g,i)=>{
+    let div = document.createElement("div");
+    div.className="card";
+    div.innerHTML = `<b>${i+1}. ${g.nama}</b><br>` +
+    opsi.map(o=>`
+        <label>
+            <input type="radio" name="${g.id}" value="${o.val}">
+            ${o.label}
+        </label>
+    `).join("");
+    form.appendChild(div);
+});
+
+let teksPDF="";
+
+// HITUNG CF PER PENYAKIT
+function hitungCF(rule, data){
+    let list = data.filter(d=>rule.includes(d.id));
+    if(list.length === 0) return 0;
+
+    let cfOld = list[0].nilai;
+    for(let i=1;i<list.length;i++){
+        cfOld = cfOld + list[i].nilai * (1 - cfOld);
+    }
+    return cfOld;
+}
+
+// PROSES
+function proses(){
+
+    let dataCF = [];
+    let logs = "";
+
+    gejala.forEach(g=>{
+        let input = document.querySelector(`input[name=${g.id}]:checked`);
+        let user = input ? parseFloat(input.value) : 0;
+
+        if(user > 0){
+            let cf = g.pakar * user;
+            dataCF.push({
+                id: g.id,
+                nama: g.nama,
+                pakar: g.pakar,
+                user: user,
+                nilai: cf
+            });
+        }
+    });
+
+    if(dataCF.length === 0){
+        alert("Pilih gejala dulu!");
+        return;
+    }
+
+    // DETAIL LANGKAH
+    let cfOld = 0;
+
+    dataCF.forEach((g, i) => {
+        logs += `Langkah ${i+1}: ${g.nama} (${g.id})\n`;
+        logs += ` - CF[H,E] = Pakar(${g.pakar}) * User(${g.user}) = ${g.nilai.toFixed(2)}\n`;
+
+        if(i === 0){
+            cfOld = g.nilai;
+            logs += ` - CF Combine Awal: ${cfOld.toFixed(3)}\n`;
+        } else {
+            let combine = cfOld + g.nilai * (1 - cfOld);
+            logs += ` - CF Combine: ${cfOld.toFixed(3)} + ${g.nilai.toFixed(2)} * (1 - ${cfOld.toFixed(3)}) = ${combine.toFixed(3)}\n`;
+            cfOld = combine;
+        }
+        logs += "\n";
+    });
+
+    // HITUNG PER PENYAKIT
+    let cfP1 = hitungCF(ruleP1, dataCF);
+    let cfP2 = hitungCF(ruleP2, dataCF);
+
+    let persenP1 = (cfP1 * 100).toFixed(2);
+    let persenP2 = (cfP2 * 100).toFixed(2);
+
+    let diagnosa = cfP2 > cfP1 ? "Demam Berdarah Dengue (DBD)" : "Demam Dengue (DD)";
+
+    let cfAkhir = Math.max(cfP1, cfP2);
+    let persenAkhir = (cfAkhir * 100).toFixed(2);
+
+    // OUTPUT (SUDAH DIPERBAIKI)
+    document.getElementById("hasil").innerHTML = `
+<h2 style="color:#c0392b;">Anda terdiagnosa: ${diagnosa}</h2>
+
+<p><b>DBD:</b> ${persenP2}%</p>
+<p><b>DD:</b> ${persenP1}%</p>
+
+<br>
+
+<p>
+CF[H,E]akhir × 100% = ${cfAkhir.toFixed(4)} × 100% = ${persenAkhir}%
+</p>
+
+<p>
+Dengan demikian, dapat disimpulkan bahwa berdasarkan perhitungan Certainty Factor, pasien terdiagnosa mengalami ${diagnosa} dengan tingkat keyakinan sebesar ${persenAkhir}%.
+</p>
+`;
+
+    document.getElementById("log").innerText = logs;
+    document.getElementById("pdfBtn").style.display = "inline-block";
+
+    teksPDF = `
+HASIL DIAGNOSA
+
+Anda terdiagnosa: ${diagnosa}
+
+DBD: ${persenP2}%
+DD: ${persenP1}%
+
+CF[H,E]akhir × 100% = ${cfAkhir.toFixed(4)} × 100% = ${persenAkhir}%
+
+Dengan demikian, pasien terdiagnosa mengalami ${diagnosa} dengan tingkat keyakinan ${persenAkhir}%.
+
+DETAIL PERHITUNGAN:
+${logs}
+`;
+}
+
+// PDF
+function downloadPDF(){
+    const { jsPDF } = window.jspdf;
+    const doc = new jsPDF();
+
+    let split = doc.splitTextToSize(teksPDF, 180);
+    doc.text(split, 10, 10);
+
+    doc.save("hasil_diagnosa.pdf");
+}
+
+</script>
+
+</body>
+</html>
